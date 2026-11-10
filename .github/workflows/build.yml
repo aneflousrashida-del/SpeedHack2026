@@ -1,0 +1,60 @@
+name: Build Android SpeedHack APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Scaffold Android Project
+      run: |
+        mkdir -p app/src/main/assets
+        mkdir -p app/src/main/java/com/example/speedhack
+
+        # إنشاء ملف المانيفست
+        echo '<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://android.com"><application android:hasCode="true"><meta-data android:name="xposedmodule" android:value="true" /><meta-data android:name="xposeddescription" android:value="SpeedHack 1.5x" /><meta-data android:name="xposedminversion" android:value="93" /></application></manifest>' > app/src/main/AndroidManifest.xml
+
+        # إنشاء ملف الجافا
+        echo -e 'package com.example.speedhack;\nimport de.robv.android.xposed.IXposedHookLoadPackage;\nimport de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;\npublic class TimeHook implements IXposedHookLoadPackage {\nstatic { System.loadLibrary("speedhack"); }\n@Override\npublic void handleLoadPackage(LoadPackageParam lpparam) throws Throwable {}\n}' > app/src/main/java/com/example/speedhack/TimeHook.java
+
+        # إنشاء ملف الملحقات لـ Shizuposed
+        echo 'com.example.speedhack.TimeHook' > app/src/main/assets/xposed_init
+
+        # إنشاء إعدادات الـ CMake
+        echo -e 'cmake_minimum_required(VERSION 3.10.2)\nproject("speedhack")\nset(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -flto")\nadd_library(speedhack SHARED speedhack.cpp)\nfind_library(log-lib log)\ntarget_link_libraries(speedhack ${log-lib})' > app/src/main/cpp/CMakeLists.txt
+
+        # بناء ملف الإعدادات المتوافق مع الإصدار الحديث لـ Gradle (تم إلغاء التعارض هنا)
+        echo -e 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS); repositories { google(); mavenCentral() } }\ninclude ":app"' > settings.gradle
+
+        # إنشاء ملف build.gradle الرئيسي فارغ لتجنب تعارض المستودعات
+        echo '// Root build file' > build.gradle
+
+        # إنشاء ملف الـ build.gradle الخاص بالتطبيق داخلياً
+        echo -e 'plugins { id "com.android.application" version "8.1.1" }\nandroid {\nnamespace "com.example.speedhack"\ncompileSdk 33\ndefaultConfig {\napplicationId "com.example.speedhack"\nminSdk 26\ntargetSdk 33\nexternalNativeBuild { cmake { cppFlags "-O3 -flto" } }\n}\nexternalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }\n}' > app/build.gradle
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Execute Android Build Process
+      run: |
+        gradle wrapper --gradle-version=8.1.1
+        ./gradlew assembleRelease
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: speedhack-apk
+        path: app/build/outputs/apk/release/*.apk
+        
